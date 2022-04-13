@@ -7,6 +7,7 @@ library(tidyverse)
 library(Hmisc)
 library(corrplot)
 library(FactoMineR)
+library(factoextra)
 library(skimr)
 library(mlbench)
 library(caret)
@@ -30,8 +31,11 @@ column_names = c("age","worker_class", "industry_code", "occupation_code", "educ
 
 # Read in dataset and include column names
 raw_census_dataset <- read.table("census-income.data", header=FALSE, sep=',', 
-                                 strip.white=TRUE, col.names=column_names, fill=FALSE, stringsAsFactors = TRUE)
+                                 strip.white=TRUE, col.names=column_names, fill=FALSE)
 
+# Read in test dataset and include column names
+raw_test_census_dataset <- read.table("census-income.test", header=FALSE, sep=',', 
+                                 strip.white=TRUE, col.names=column_names, fill=FALSE)
 # Class of dataset
 class(raw_census_dataset)
 
@@ -56,15 +60,11 @@ clean_income_dataset <- function(dataset_data){
   # Remove individuals under 16
   dataset_data <- dataset_data[dataset_data$age >= 16, ]
   
-  # Remove 'Not in universe' occupation types
-  dataset_data <- dataset_data[dataset_data$occupation_type != 'Not in universe', ]
-  
   # Removing non-desirable features
   dataset_data$year <- NULL
-  dataset_data$occupation_type <- NULL
+  dataset_data$occupation_code <- NULL
   dataset_data$industry_code <- NULL
   dataset_data$region_previous_residence <- NULL
-  dataset_data$tax_filer_status <- NULL
   dataset_data$migration_code_change_in_msa <- NULL
   dataset_data$migration_code_change_in_reg <- NULL
   dataset_data$migration_code_move_within_reg <- NULL
@@ -72,24 +72,33 @@ clean_income_dataset <- function(dataset_data){
   dataset_data$instance_weight <- NULL
   dataset_data$country_of_birth_mother <- NULL
   dataset_data$country_of_birth_father <- NULL
-  
-  # Maybe delete these
   dataset_data$hispanic_origin <- NULL
   dataset_data$veteran_benefits <- NULL
-  dataset_data$full_or_part_time_employment_stat <- NULL
   dataset_data$detailed_household_and_family_stat <- NULL
   dataset_data$fill_inc_questionnaire_for_veterans_admin <- NULL
   dataset_data$enrolled_in_edu_inst_last_wk <- NULL
   dataset_data$member_of_labour_union <- NULL
-  dataset_data$family_members_under_18 <- NULL
   dataset_data$own_business_or_self_employed <- NULL
   dataset_data$live_in_this_house_1_year_ago <- NULL
-  dataset_data$reason_for_unemployment <- NULL
   dataset_data$state_of_previous_residence <- NULL
+  dataset_data$reason_for_unemployment <- NULL
+  dataset_data$family_members_under_18 <- NULL
+  dataset_data$householder_status <- NULL
+  dataset_data$full_or_part_time_employment_stat <- NULL
+  
+  # Remove 'Not in universe' occupation types
+  dataset_data <- dataset_data[dataset_data$occupation_type != 'Not in universe', ]
   
   # Remove NA, ? values
-  question_mark <- dataset_data == " ?"
-  data_set_data <- na.omit(dataset_data)
+  question_mark <- dataset_data == "?"
+  is.na(dataset_data) <- question_mark
+  dataset_data <- na.omit(dataset_data)
+  
+  # Print unique categories of household summary
+  unique(dataset_data$detailed_household_summary_in_household)
+  
+  # Convert strings to factors
+  dataset_data[sapply(dataset_data, is.character)] <- lapply(dataset_data[sapply(dataset_data, is.character)], as.factor)
   
   # Combine non-housholder categories
   levels(dataset_data$detailed_household_summary_in_household)[match("Spouse of householder", levels(dataset_data$detailed_household_summary_in_household))] <- "Non-householder"
@@ -101,6 +110,19 @@ clean_income_dataset <- function(dataset_data){
   levels(dataset_data$detailed_household_summary_in_household)[match("Child under 18 never married", levels(dataset_data$detailed_household_summary_in_household))] <- "Non-householder"
   levels(dataset_data$detailed_household_summary_in_household)[match("Child under 18 ever married", levels(dataset_data$detailed_household_summary_in_household))] <- "Non-householder"
   
+  # Combine marital status categories
+  levels(dataset_data$marital_status)[match("Married-A F spouse present", levels(dataset_data$marital_status))] <- "Married"
+  levels(dataset_data$marital_status)[match("Married-spouse absent", levels(dataset_data$marital_status))] <- "Married"
+  levels(dataset_data$marital_status)[match("Married-civilian spouse present", levels(dataset_data$marital_status))] <- "Married"
+  levels(dataset_data$marital_status)[match("Married-A F spouse present", levels(dataset_data$marital_status))] <- "Married"
+  
+  # Combine citizenship categories
+  levels(dataset_data$citizenship)[match("Native- Born in the United States", levels(dataset_data$citizenship))] <- "US Citizen"
+  levels(dataset_data$citizenship)[match("Foreign born- Not a citizen of U S", levels(dataset_data$citizenship))] <- "Non-US Citizen"
+  levels(dataset_data$citizenship)[match("Foreign born- U S citizen by naturalization", levels(dataset_data$citizenship))] <- "US Citizen"
+  levels(dataset_data$citizenship)[match("Native- Born abroad of American Parent(s)", levels(dataset_data$citizenship))] <- "US Citizen"
+  levels(dataset_data$citizenship)[match("Native- Born in Puerto Rico or U S Outlying", levels(dataset_data$citizenship))] <- "US Citizen"
+  
   # Change numeric values of num persons worked for employer into categorical 
   dataset_data[which(dataset_data$num_persons_worked_for_employer ==0), 'num_persons_worked_for_employer'] = 'Employee'
   dataset_data[which(dataset_data$num_persons_worked_for_employer ==1), 'num_persons_worked_for_employer'] = 'Under 10'
@@ -110,6 +132,14 @@ clean_income_dataset <- function(dataset_data){
   dataset_data[which(dataset_data$num_persons_worked_for_employer ==5), 'num_persons_worked_for_employer'] = '500-999'
   dataset_data[which(dataset_data$num_persons_worked_for_employer ==6), 'num_persons_worked_for_employer'] = '1000+'
   
+  # Combine tax filer categories
+  levels(dataset_data$tax_filer_status)[match("Joint both under 65", levels(dataset_data$tax_filer_status))] <- "Joint"
+  levels(dataset_data$tax_filer_status)[match("Joint one under 65 & one 65+", levels(dataset_data$tax_filer_status))] <- "Joint"
+  levels(dataset_data$tax_filer_status)[match("Joint both 65+", levels(dataset_data$tax_filer_status))] <- "Joint"
+  
+  # Combine worker class 
+  levels(dataset_data$worker_class)[match("Self-employed-not incorporated", levels(dataset_data$worker_class))] <- "Self-employed"
+  levels(dataset_data$worker_class)[match("Self-employed-incorporated", levels(dataset_data$worker_class))] <- "Self-employed"
 
   return(dataset_data)
 }
@@ -198,11 +228,18 @@ corr_cross(numeric_raw_census, max_pvalue=0.05, top=10)
 # Clean our dataset / feature engineering
 census_income <- clean_income_dataset(raw_census_dataset)
 
-# Decision tree 
-tree <- rpart(income_threshold~., data=raw_census_dataset, method="class")
+# Decision tree feature importance 
+tree <- rpart(income_threshold~., data=census_income, method="class")
 important_variables <- varImp(tree)
 important_variables$feature <- rownames(important_variables)
 rownames(important_variables) <- NULL
 print(important_variables)
 
-important_variables <- important_variables[order(-important_variables$Overall),]
+# Random forest feature importance
+regressor <- randomForest(income_threshold~., data=census_income, importance=TRUE)
+varImp(regressor)
+test_census_income = clean_income_dataset(raw_test_census_dataset)
+
+
+
+
