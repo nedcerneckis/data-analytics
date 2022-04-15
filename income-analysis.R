@@ -20,6 +20,7 @@ library(rpart)
 library(nnet)
 library(NeuralNetTools)
 library(ipred)
+library(ROCR)
 
 column_names = c("age","worker_class", "industry_code", "occupation_code", "education",
     "wage_per_hour", "enrolled_in_edu_inst_last_wk", "marital_status", "industry_type", "occupation_type",
@@ -72,9 +73,9 @@ question_mark <- raw_census_dataset == "?"
 is.na(raw_census_dataset) <- question_mark
 rf_imp_df <- na.omit(raw_census_dataset)
 rf_imp_df[sapply(rf_imp_df, is.character)] <- lapply(rf_imp_df[sapply(rf_imp_df, is.character)], as.factor)
-#regressor <- randomForest(income_threshold~., data=rf_imp_df, importance=TRUE)
-#rf_important_variables <- varImp(regressor)
-#p1 <- predict(regressor, rf_imp_df)
+regressor <- randomForest(income_threshold~., data=rf_imp_df, importance=TRUE)
+rf_important_variables <- varImp(regressor)
+p1 <- predict(regressor, rf_imp_df)
 
 # Cleaning function to clean dataset
 clean_income_dataset <- function(dataset_data){
@@ -244,6 +245,8 @@ test_census_income <- clean_income_dataset(test_raw_census_dataset)
 skim(census_income)
 skim(test_census_income)
 
+# 
+
 # Neural Networks
 census_model_nn <- nnet(income_threshold~., data=census_income, size=8, maxit=500, decay=0.0001)
 test_census_income_nn <- test_census_income
@@ -263,3 +266,42 @@ census_model_b <- bagging(formula=income_threshold~., data=census_income, nbagg=
 b_prediction <- predict(census_model_b, census_income)
 b_prediction_test <- predict(census_model_b, test_census_income)
 confusionMatrix(b_prediction_test, test_census_income$income_threshold)
+
+# ROC Curve
+# Random Forest
+rf_prediction_test.prob <- predict(census_model_rf, test_census_income, type="prob")
+rf_prediction_test <- predict(census_model_rf, test_census_income, type="class")
+pr_rf <- prediction(rf_prediction_test.prob[,2], test_census_income$income_threshold)
+prf_rf <- performance(pr_rf, measure="tpr", x.measure="fpr")
+rf_df <- data.frame(FP = prf_rf@x.values[[1]], TP = prf_rf@y.values[[1]])
+# Neural Networks
+nn_prediction <- predict(census_model_nn, newdata = test_census_income_nn, type = 'raw')
+pr_nn <- prediction(nn_prediction, test_census_income_nn$income_threshold)
+prf_nn <- performance(pr_nn, measure="tpr", x.measure="fpr")
+nn_df <- data.frame(FP = prf_nn@x.values[[1]], TP = prf_nn@y.values[[1]])
+# Bagging
+rf_roc_prediction_test.prob <- predict(census_model_b, test_census_income, type="prob")
+rf_roc_prediction_test <- predict(census_model_rf, test_census_income, type="class")
+pr_b <- prediction(rf_roc_prediction_test.prob[,2], test_census_income$income_threshold)
+prf_b <- performance(pr_b, measure="tpr", x.measure="fpr")
+b_df <- data.frame(FP = prf_b@x.values[[1]], TP = prf_b@y.values[[1]])
+
+# ROC plot
+roc_plot <- ggplot() +
+  geom_line(data=rf_df, aes(x=FP, y=TP, color="Random Forest")) +
+  geom_line(data=nn_df, aes(x=FP, y=TP, color="Neural Network")) +
+  geom_line(data=b_df, aes(x=FP, y=TP, color="Bagging")) +
+  geom_segment(aes(x=0, xend=1, y=0, yend=1)) +
+  ggtitle('ROC Curve plot for Neural Network') +
+  labs(x="False Positive Rate", y="True Positive Rate")
+roc_plot
+
+# AUC values
+auc_nn <- performance(pr_nn, measure="auc")@y.values[[1]]
+auc_rf <- performance(pr_rf, measure="auc")@y.values[[1]]
+auc_b <- performance(pr_b, measure="auc")@y.values[[1]]
+Model <- c("Neural Network", "Random Forest", "Bagging")
+auc_values <- c(auc_nn, auc_rf, auc_b)
+auc_df <- data.frame(Model, auc_values)
+print(auc_df)
+
