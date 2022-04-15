@@ -15,7 +15,11 @@ library(randomForest)
 library(e1071)
 library(corrplot)
 library(lares)
+library(devtools)
 library(rpart)
+library(nnet)
+library(NeuralNetTools)
+library(ipred)
 
 column_names = c("age","worker_class", "industry_code", "occupation_code", "education",
     "wage_per_hour", "enrolled_in_edu_inst_last_wk", "marital_status", "industry_type", "occupation_type",
@@ -34,7 +38,7 @@ raw_census_dataset <- read.table("census-income.data", header=FALSE, sep=',',
                                  strip.white=TRUE, col.names=column_names, fill=FALSE)
 
 # Read in test dataset and include column names
-raw_test_census_dataset <- read.table("census-income.test", header=FALSE, sep=',', 
+test_raw_census_dataset <- read.table("census-income.test", header=FALSE, sep=',', 
                                  strip.white=TRUE, col.names=column_names, fill=FALSE)
 # Class of dataset
 class(raw_census_dataset)
@@ -53,6 +57,24 @@ describe(raw_census_dataset)
 
 # Condensed description of unique values
 str(raw_census_dataset, vec.len=8)
+
+# PCA
+census_numeric <- raw_census_dataset %>% dplyr::select(where(is.numeric))
+census_pca <- prcomp(census_numeric, center=TRUE, scale=TRUE)
+fviz_pca_var(census_pca, col.var="contrib", repel=TRUE)
+
+# Recursive partitioning feature importance 
+tree <- rpart(income_threshold~., data=raw_census_dataset, method="class")
+rp_important_variables <- varImp(tree)
+
+# Random forest feature importance
+question_mark <- raw_census_dataset == "?"
+is.na(raw_census_dataset) <- question_mark
+rf_imp_df <- na.omit(raw_census_dataset)
+rf_imp_df[sapply(rf_imp_df, is.character)] <- lapply(rf_imp_df[sapply(rf_imp_df, is.character)], as.factor)
+#regressor <- randomForest(income_threshold~., data=rf_imp_df, importance=TRUE)
+#rf_important_variables <- varImp(regressor)
+#p1 <- predict(regressor, rf_imp_df)
 
 # Cleaning function to clean dataset
 clean_income_dataset <- function(dataset_data){
@@ -94,9 +116,6 @@ clean_income_dataset <- function(dataset_data){
   is.na(dataset_data) <- question_mark
   dataset_data <- na.omit(dataset_data)
   
-  # Print unique categories of household summary
-  unique(dataset_data$detailed_household_summary_in_household)
-  
   # Convert strings to factors
   dataset_data[sapply(dataset_data, is.character)] <- lapply(dataset_data[sapply(dataset_data, is.character)], as.factor)
   
@@ -124,13 +143,14 @@ clean_income_dataset <- function(dataset_data){
   levels(dataset_data$citizenship)[match("Native- Born in Puerto Rico or U S Outlying", levels(dataset_data$citizenship))] <- "US Citizen"
   
   # Change numeric values of num persons worked for employer into categorical 
-  dataset_data[which(dataset_data$num_persons_worked_for_employer ==0), 'num_persons_worked_for_employer'] = 'Employee'
-  dataset_data[which(dataset_data$num_persons_worked_for_employer ==1), 'num_persons_worked_for_employer'] = 'Under 10'
-  dataset_data[which(dataset_data$num_persons_worked_for_employer ==2), 'num_persons_worked_for_employer'] = '10-24'
-  dataset_data[which(dataset_data$num_persons_worked_for_employer ==3), 'num_persons_worked_for_employer'] = '25-99'
-  dataset_data[which(dataset_data$num_persons_worked_for_employer ==4), 'num_persons_worked_for_employer'] = '100-499'
-  dataset_data[which(dataset_data$num_persons_worked_for_employer ==5), 'num_persons_worked_for_employer'] = '500-999'
-  dataset_data[which(dataset_data$num_persons_worked_for_employer ==6), 'num_persons_worked_for_employer'] = '1000+'
+  dataset_data$num_persons_worked_for_employer <- as.factor(dataset_data$num_persons_worked_for_employer)
+  levels(dataset_data$num_persons_worked_for_employer)[match("0", levels(dataset_data$num_persons_worked_for_employer))] <- "Employee"
+  levels(dataset_data$num_persons_worked_for_employer)[match("1", levels(dataset_data$num_persons_worked_for_employer))] <- "Under 10"
+  levels(dataset_data$num_persons_worked_for_employer)[match("2", levels(dataset_data$num_persons_worked_for_employer))] <- "10-24"
+  levels(dataset_data$num_persons_worked_for_employer)[match("3", levels(dataset_data$num_persons_worked_for_employer))] <- "25-99"
+  levels(dataset_data$num_persons_worked_for_employer)[match("4", levels(dataset_data$num_persons_worked_for_employer))] <- "100-499"
+  levels(dataset_data$num_persons_worked_for_employer)[match("5", levels(dataset_data$num_persons_worked_for_employer))] <- "500-999"
+  levels(dataset_data$num_persons_worked_for_employer)[match("6", levels(dataset_data$num_persons_worked_for_employer))] <- "1000+"
   
   # Combine tax filer categories
   levels(dataset_data$tax_filer_status)[match("Joint both under 65", levels(dataset_data$tax_filer_status))] <- "Joint"
@@ -218,28 +238,28 @@ ggplot(raw_census_dataset %>%
   labs(title="Income threshold frequency compared to sex", x="Sex", 
        y="Frequency", fill="Income Threshold")
 
-# Clean our dataset / feature engineering
+# Clean both our datasets / feature engineering
 census_income <- clean_income_dataset(raw_census_dataset)
+test_census_income <- clean_income_dataset(test_raw_census_dataset)
+skim(census_income)
+skim(test_census_income)
 
-# top 10 most ranked cross-correlations
-numeric_raw_census <- select_if(census_income, is.numeric)
-corr_cross(numeric_raw_census, max_pvalue=0.05, top=10)
+# Neural Networks
+census_model_nn <- nnet(income_threshold~., data=census_income, size=8, maxit=500, decay=0.0001)
+test_census_income_nn <- test_census_income
+test_census_income_nn$pred_nn <- predict(census_model_nn, test_census_income_nn, type="class")
+confusionMatrix(table(test_census_income_nn$pred_nn, test_census_income_nn$income_threshold))
 
-# Clean our dataset / feature engineering
-census_income <- clean_income_dataset(raw_census_dataset)
+# Random Forest
+set.seed(256)
+census_model_rf <- randomForest(income_threshold~., data=census_income)
+rf_prediction <- predict(census_model_rf, census_income)
+rf_prediction_test <- predict(census_model_rf, test_census_income)
+confusionMatrix(rf_prediction_test, test_census_income$income_threshold)
 
-# Decision tree feature importance 
-tree <- rpart(income_threshold~., data=census_income, method="class")
-important_variables <- varImp(tree)
-important_variables$feature <- rownames(important_variables)
-rownames(important_variables) <- NULL
-print(important_variables)
-
-# Random forest feature importance
-regressor <- randomForest(income_threshold~., data=census_income, importance=TRUE)
-varImp(regressor)
-test_census_income = clean_income_dataset(raw_test_census_dataset)
-
-
-
-
+# Bagging
+census_model_b <- bagging(formula=income_threshold~., data=census_income, nbagg=100, coob=TRUE, 
+                          control=rpart.control(minsplit = 2, cp=0))
+b_prediction <- predict(census_model_b, census_income)
+b_prediction_test <- predict(census_model_b, test_census_income)
+confusionMatrix(b_prediction_test, test_census_income$income_threshold)
