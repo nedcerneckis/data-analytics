@@ -305,3 +305,20 @@ auc_values <- c(auc_nn, auc_rf, auc_b)
 auc_df <- data.frame(Model, auc_values)
 print(auc_df)
 
+# Histograms
+ggplot(census_income, aes(x=capital_gains, fill=income_threshold)) +
+  geom_histogram() +
+  labs(title="Capital gains histogram", x="Capital Gains", 
+       y="Frequency", fill="Income Threshold")
+ggplot(census_income, aes(x=capital_gains, fill=income_threshold)) +
+  geom_histogram() +
+  labs(title="Capital losses histogram", x="Capital Losses", 
+       y="Frequency", fill="Income Threshold")
+ggplot(census_income, aes(x=capital_losses, fill=income_threshold)) +
+  geom_histogram() +
+  labs(title="Divdends from stocks histogram", x="Divdends from stocks", 
+       y="Frequency", fill="Income Threshold")
+
+
+
+
